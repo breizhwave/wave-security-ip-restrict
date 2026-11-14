@@ -83,6 +83,165 @@ php artisan ip-restrict:remove 192.0.2.10
 php artisan ip-restrict:remove 198.51.100.7 --restore   # restore a hidden .env entry
 ```
 
+## Managing the list from your own admin
+
+The bundled admin page is plain on purpose. To manage the list inside your own back office (your layout, your authentication, your language), leave `IP_RESTRICT_ADMIN` off and call `Wave\SecurityIpRestrict\IpList` yourself. The container gives one shared instance built from the config, so you can type-hint it in a controller.
+
+| Method | Returns |
+| --- | --- |
+| `isActive()` | `true` when the `.env` list is not empty. |
+| `isAllowed($ip)` | Whether an address gets in (list or `local`). |
+| `all()` | Every entry: `ip`, `label`, `source` (`env` or `added`), `hidden`, `protected`, and `added_at`, `added_by`, `hidden_at` when set. |
+| `add($ip, $label, $by)` | `false` if the entry is already there. |
+| `remove($ip, $myIp, $by)` | `IpList::REMOVED`, `PROTECTED_ENTRY`, `IN_USE` (covers `$myIp`) or `UNKNOWN`. A `.env` entry is only hidden. |
+| `restore($ip)` | Shows a hidden `.env` entry again. `false` if it was not hidden. |
+| `IpList::isValid($ip)` | Valid IPv4 / IPv6 address or CIDR range. |
+| `IpList::covers($entry, $ip)` | Whether an entry matches an address. Use it to highlight the row of the current visitor. |
+
+### 1. Routes
+
+Put them inside your admin group, behind your own authentication. Throttle the write routes:
+
+```php
+use App\Http\Controllers\Admin\IpAccessController;
+
+Route::middleware(['web', 'auth', 'can:admin'])->prefix('admin')->group(function () {
+    Route::get('ip-access', [IpAccessController::class, 'index'])->name('ip-access');
+    Route::middleware('throttle:20,1')->group(function () {
+        Route::post('ip-access', [IpAccessController::class, 'add'])->name('ip-access.add');
+        Route::delete('ip-access', [IpAccessController::class, 'remove'])->name('ip-access.remove');
+        Route::post('ip-access/restore', [IpAccessController::class, 'restore'])->name('ip-access.restore');
+    });
+});
+```
+
+### 2. Controller
+
+```php
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Wave\SecurityIpRestrict\IpList;
+
+class IpAccessController extends Controller
+{
+    public function index(Request $request, IpList $ips)
+    {
+        return view('admin.ip-access', [
+            'entries' => $ips->all(),
+            'active' => $ips->isActive(),
+            'myIp' => $request->ip(),
+            'myIpAllowed' => $ips->isAllowed($request->ip()),
+        ]);
+    }
+
+    public function add(Request $request, IpList $ips)
+    {
+        $data = $request->validate([
+            'ip' => ['required', 'string', 'max:64', function ($attribute, $value, $fail) {
+                if (! IpList::isValid(trim((string) $value))) {
+                    $fail('Expected an IPv4 or IPv6 address, or a CIDR range.');
+                }
+            }],
+            'label' => ['required', 'string', 'max:100'],
+        ]);
+
+        $ip = trim($data['ip']);
+        $by = $request->user() ? $request->user()->email : $request->ip();   // stored as added_by
+
+        return $ips->add($ip, trim($data['label']), $by)
+            ? redirect()->route('ip-access')->with('status', "$ip added.")
+            : back()->withErrors("$ip is already in the list.");
+    }
+
+    public function remove(Request $request, IpList $ips)
+    {
+        $ip = (string) $request->input('ip');
+
+        switch ($ips->remove($ip, $request->ip(), (string) $request->ip())) {
+            case IpList::REMOVED:
+                return redirect()->route('ip-access')->with('status', "$ip removed.");
+            case IpList::PROTECTED_ENTRY:
+                return back()->withErrors("$ip is protected.");
+            case IpList::IN_USE:
+                return back()->withErrors("$ip covers your own address: removing it would lock you out.");
+            default:
+                return back()->withErrors("$ip is not in the list.");
+        }
+    }
+
+    public function restore(Request $request, IpList $ips)
+    {
+        $ip = (string) $request->input('ip');
+
+        return $ips->restore($ip)
+            ? redirect()->route('ip-access')->with('status', "$ip restored.")
+            : back()->withErrors("$ip was not removed.");
+    }
+}
+```
+
+### 3. View
+
+Extend your own layout. One row per entry, with the right action for each case:
+
+```blade
+@extends('admin.layout')
+
+@section('content')
+    <p>
+        Restriction <strong>{{ $active ? 'active' : 'off (IP_RESTRICT_IPS is empty)' }}</strong>.
+        Your address: <code>{{ $myIp }}</code> ({{ $myIpAllowed ? 'allowed' : 'not listed' }}).
+    </p>
+
+    <table>
+        @foreach ($entries as $entry)
+            @php($mine = ! $entry['hidden'] && \Wave\SecurityIpRestrict\IpList::covers($entry['ip'], $myIp))
+            <tr @class(['hidden-entry' => $entry['hidden'], 'mine' => $mine])>
+                <td><code>{{ $entry['ip'] }}</code> @if ($mine) (your address) @endif</td>
+                <td>{{ $entry['label'] }}</td>
+                <td>{{ $entry['source'] === 'env' ? '.env' : 'added by '.($entry['added_by'] ?? '?') }}</td>
+                <td>
+                    @if ($entry['hidden'])
+                        <form method="POST" action="{{ route('ip-access.restore') }}">
+                            @csrf <input type="hidden" name="ip" value="{{ $entry['ip'] }}">
+                            <button>Restore</button>
+                        </form>
+                    @elseif ($entry['protected'])
+                        protected
+                    @elseif ($mine)
+                        in use
+                    @else
+                        <form method="POST" action="{{ route('ip-access.remove') }}">
+                            @csrf @method('DELETE') <input type="hidden" name="ip" value="{{ $entry['ip'] }}">
+                            <button>Remove</button>
+                        </form>
+                    @endif
+                </td>
+            </tr>
+        @endforeach
+    </table>
+
+    <form method="POST" action="{{ route('ip-access.add') }}">
+        @csrf
+        <input name="ip" required maxlength="64" placeholder="90.12.34.56 or 2001:db8::/64">
+        <input name="label" required maxlength="100" placeholder="Who, where">
+        <button>Add</button>
+        @unless ($myIpAllowed)
+            <button onclick="this.form.ip.value = @js($myIp)">Add my address</button>
+        @endunless
+    </form>
+@endsection
+```
+
+### 4. Tips
+
+- **Your own 403 page**: set `forbidden_view` to one of your views. It receives `$ip`.
+- **Your own `.env` names**: the config file is yours once published, e.g. `'ips' => env('ALLOWED_IPS', '')`.
+- **IPv6 at home**: a home IPv6 address changes often. Suggest adding its `/64` range (first four groups, then `::/64`).
+- **Older Laravel**: `@class`, `@js`, `@php(...)` and `$request->validate()` need recent versions. On Laravel 5.x, use `$this->validate($request, ...)`, plain `class="..."` attributes and `json_encode`.
+
 ## Checking that the restriction is active
 
 Browsing from an allowed address only shows that you get in. To check the restriction, send a request from an address that is **not** on the list. You should get the 403 page, and it shows the address the server saw. Ways to do this:
