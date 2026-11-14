@@ -4,6 +4,8 @@ Restrict a whole Laravel application to an allow list of IP addresses (IPv4, IPv
 
 - The list comes from the `.env` (`IP_RESTRICT_IPS`). An empty list means no restriction at all.
 - An optional admin page and console commands let someone who already has access add, remove (hide) and restore entries. These changes go to a JSON file that survives deployments.
+  - **Removing an added entry** deletes it from the JSON file.
+  - **Removing a `.env` entry** only hides it: the JSON file records the address with when and by whom (`hidden_at`, `hidden_by`), and the address is refused from then on. The `.env` itself is never changed. The application often can't write to it (read-only file, cached config, managed by the deployment), and it stays the reference list that you version and deploy. Hiding also keeps the removal reversible: **restoring** (`ip-restrict:remove <ip> --restore`, or the button on the page) takes the address off the hidden list, with its original `.env` label, without touching the server. To remove a `.env` address for good, delete it from `IP_RESTRICT_IPS`.
 - Some `.env` entries can be protected (they are never removable from the page), and nobody can remove the entry that covers the address they are using.
 - Refused requests get a 403 page that shows the visitor's address. The page is in English and French and can be published to change it.
 - **PHP 5.6 to 8.x, Laravel 5.1 to 13**: the package uses PHP 5.6 syntax only, framework features that exist since Laravel 5.1, and its own CIDR matcher with no Symfony version dependency.
