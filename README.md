@@ -83,6 +83,30 @@ php artisan ip-restrict:remove 192.0.2.10
 php artisan ip-restrict:remove 198.51.100.7 --restore   # restore a hidden .env entry
 ```
 
+## Checking that the restriction is active
+
+Browsing from an allowed address only shows that you get in. To check the restriction, send a request from an address that is **not** on the list. You should get the 403 page, and it shows the address the server saw. Ways to do this:
+
+- **Phone on mobile data**: turn Wi-Fi off and open the site. The mobile network gives the phone a different public address.
+- **Remote or cloud browser**: a browser running on someone else's machine (a remote browser service, a browser on a cloud VM, a browser testing platform) connects from that machine's address.
+- **VPN or Tor**: connect through a VPN, or open the site in Tor Browser.
+- **`curl` from a server** you can log into (a VPS, another host, a CI job):
+
+  ```bash
+  curl -s -o /dev/null -w "%{http_code}\n" https://example.com/   # expect 403
+  curl -s -o /dev/null -w "%{http_code}\n" https://example.com/up # expect 200 (in `except`)
+  ```
+
+- **Header spoofing check**: from a refused address, pretend to be an allowed one. This must still return 403. If it returns 200, your trusted proxy settings accept forwarded headers from anyone (see the notes below):
+
+  ```bash
+  curl -s -o /dev/null -w "%{http_code}\n" -H "X-Forwarded-For: 203.0.113.10" https://example.com/
+  ```
+
+- **Locally, without a second address**: `php artisan ip-restrict:list` shows the active entries. `127.0.0.1` and `::1` are always allowed, so a test on `php artisan serve` proves nothing. Use the package tests (`php tests/run.php`) for the matching logic.
+
+**Does testing weaken the security?** No. A refused request only receives the 403 page, and that page shows the visitor their own address. It never shows the list. The one risk is how you test: don't add a remote browser, VPN or public Wi-Fi address to the list "to see if it works", because many other people share that address. If you do add one for a test, remove it straight after with `php artisan ip-restrict:remove <ip>`.
+
 ## Security notes
 
 - **Reverse proxy or CDN**: the package checks `$request->ip()`. Behind a proxy, configure Laravel's trusted proxies first. If you don't, every visitor seems to come from the proxy, and if the proxy is `127.0.0.1` every visitor passes.
@@ -118,3 +142,5 @@ php tests/run.php     # IP logic, no framework and no Composer needed, any PHP f
 ## License
 
 MIT
+
+Made with [Breizhvibe](https://wave.bzh/en/breizhvibe), a set of vibe-coding skills and tools for web development.
