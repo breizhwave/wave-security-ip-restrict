@@ -50,8 +50,50 @@ class IpMatcher
         }
 
         $bits = isset($parts[1]) ? (int) $parts[1] : strlen($netBin) * 8;
+
+        return self::samePrefix($ipBin, $netBin, $bits);
+    }
+
+    /**
+     * Do two entries (addresses or CIDR ranges) share at least one address?
+     * Two CIDR ranges either nest or are disjoint: compare them over the shorter mask.
+     *
+     * @param  string  $a
+     * @param  string  $b
+     * @return bool
+     */
+    public static function overlaps($a, $b)
+    {
+        if (! self::isValid($a) || ! self::isValid($b)) {
+            return false;
+        }
+        $pa = explode('/', $a, 2);
+        $pb = explode('/', $b, 2);
+        $binA = self::toBinary($pa[0]);
+        $binB = self::toBinary($pb[0]);
+        if ($binA === false || $binB === false || strlen($binA) !== strlen($binB)) {
+            return false;
+        }
+        $max = strlen($binA) * 8;
+        $bitsA = isset($pa[1]) ? (int) $pa[1] : $max;
+        $bitsB = isset($pb[1]) ? (int) $pb[1] : $max;
+
+        return self::samePrefix($binA, $binB, min($bitsA, $bitsB));
+    }
+
+    /**
+     * Are the first $bits bits of two packed addresses of the same length equal?
+     *
+     * @param  string  $a
+     * @param  string  $b
+     * @param  int  $bits
+     * @return bool
+     */
+    private static function samePrefix($a, $b, $bits)
+    {
+        $bits = min($bits, strlen($a) * 8);
         $bytes = (int) floor($bits / 8);
-        if ($bytes > 0 && substr($ipBin, 0, $bytes) !== substr($netBin, 0, $bytes)) {
+        if ($bytes > 0 && substr($a, 0, $bytes) !== substr($b, 0, $bytes)) {
             return false;
         }
         $rest = $bits % 8;
@@ -60,7 +102,7 @@ class IpMatcher
         }
         $mask = (0xFF << (8 - $rest)) & 0xFF;
 
-        return (ord($ipBin[$bytes]) & $mask) === (ord($netBin[$bytes]) & $mask);
+        return (ord($a[$bytes]) & $mask) === (ord($b[$bytes]) & $mask);
     }
 
     /**

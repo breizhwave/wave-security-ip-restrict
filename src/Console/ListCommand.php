@@ -8,7 +8,7 @@ class ListCommand extends Command
 {
     protected $signature = 'ip-restrict:list';
 
-    protected $description = 'List the allowed IP addresses (.env and added ones)';
+    protected $description = 'List the allowed and the denied IP addresses (.env and added ones)';
 
     public function handle()
     {
@@ -26,6 +26,19 @@ class ListCommand extends Command
             );
         }
         $this->table(array('Address or range', 'Label', 'Source', 'State', 'Date'), $rows);
+
+        $denied = array();
+        foreach ($ips->denied() as $entry) {
+            $denied[] = array(
+                $entry['ip'],
+                $entry['label'],
+                $entry['source'] === 'added' && isset($entry['added_by']) && $entry['added_by'] === 'auto' ? 'auto' : $entry['source'],
+                isset($entry['added_at']) ? $entry['added_at'] : '',
+                empty($entry['expires_at']) ? 'until unblocked' : $entry['expires_at'],
+            );
+        }
+        $this->line('Denied:');
+        $this->table(array('Address or range', 'Reason', 'Source', 'Date', 'Until'), $denied);
 
         return 0;
     }

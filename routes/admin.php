@@ -16,4 +16,7 @@ $router->group(array(
     $router->post('/', array('as' => 'ip-restrict.add', 'uses' => $controller.'@add', 'middleware' => $write));
     $router->post('/remove', array('as' => 'ip-restrict.remove', 'uses' => $controller.'@remove', 'middleware' => $write));
     $router->post('/restore', array('as' => 'ip-restrict.restore', 'uses' => $controller.'@restore', 'middleware' => $write));
+    $router->post('/deny', array('as' => 'ip-restrict.deny', 'uses' => $controller.'@deny', 'middleware' => $write));
+    $router->post('/undeny', array('as' => 'ip-restrict.undeny', 'uses' => $controller.'@undeny', 'middleware' => $write));
+    $router->get('/attempts', array('as' => 'ip-restrict.attempts', 'uses' => $controller.'@attempts'));
 });

@@ -1,7 +1,7 @@
 {
     "name": "breizhwave/wave-security-ip-restrict",
-    "description": "Restrict a whole Laravel application to an IP allow list (IPv4, IPv6, CIDR), managed from .env and an optional admin page. PHP 5.6+ and Laravel 5.1 to 13.",
-    "keywords": ["laravel", "ip", "whitelist", "allowlist", "cidr", "ipv6", "middleware", "security", "restrict"],
+    "description": "Restrict a whole Laravel application to an IP allow list (IPv4, IPv6, CIDR), deny list, attack attempts log and automatic blocking of brute force and scans, managed from .env and an optional admin page. PHP 5.6+ and Laravel 5.1 to 13.",
+    "keywords": ["laravel", "ip", "whitelist", "allowlist", "cidr", "ipv6", "middleware", "security", "restrict", "blacklist", "denylist", "brute-force", "fail2ban"],
     "type": "library",
     "license": "MIT",
     "authors": [

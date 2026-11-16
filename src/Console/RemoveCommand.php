@@ -7,14 +7,32 @@ use Wave\SecurityIpRestrict\IpList;
 
 class RemoveCommand extends Command
 {
-    protected $signature = 'ip-restrict:remove {ip : Address or CIDR range, as listed} {--restore : Restore a removed .env entry instead}';
+    protected $signature = 'ip-restrict:remove {ip : Address or CIDR range, as listed} {--restore : Restore a removed .env entry instead}'
+        .' {--deny : Unblock a denied address instead}';
 
-    protected $description = 'Remove an allowed IP (an .env entry is hidden), or restore a hidden .env entry';
+    protected $description = 'Remove an allowed IP (an .env entry is hidden), restore a hidden .env entry, or unblock a denied IP';
 
     public function handle()
     {
         $ip = trim((string) $this->argument('ip'));
         $ips = $this->laravel->make('Wave\SecurityIpRestrict\IpList');
+
+        if ($this->option('deny')) {
+            switch ($ips->undeny($ip)) {
+                case IpList::REMOVED:
+                    $this->info("$ip unblocked.");
+
+                    return 0;
+                case IpList::ENV_ENTRY:
+                    $this->error("$ip is denied by the .env (IP_RESTRICT_DENY): remove it there.");
+
+                    return 1;
+                default:
+                    $this->error("$ip is not denied.");
+
+                    return 1;
+            }
+        }
 
         if ($this->option('restore')) {
             if ($ips->restore($ip)) {

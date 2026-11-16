@@ -19,6 +19,21 @@ return array(
 
     'ips' => env('IP_RESTRICT_IPS', ''),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Denied addresses (.env)
+    |--------------------------------------------------------------------------
+    |
+    | Same format as "ips". A denied address is refused even when it is allowed, and even when
+    | the restriction is off (empty IP_RESTRICT_IPS). Local addresses are never denied.
+    | Addresses denied from the admin page, the console or the automatic blocking are added
+    | to the JSON file ("file"), optionally for a limited time.
+    |   IP_RESTRICT_DENY="198.51.100.0/24=Scraper,203.0.113.66=Spam"
+    |
+    */
+
+    'deny' => env('IP_RESTRICT_DENY', ''),
+
     // .env entries that can never be removed from the admin page: those whose label starts with
     // one of these names ("Alice" also protects "Alice (IPv6)"). An added entry is never protected.
     'protected' => env('IP_RESTRICT_PROTECTED', ''),
@@ -37,8 +52,62 @@ return array(
     // Wave\SecurityIpRestrict\Http\Middleware\RestrictIp yourself (route group, alias…).
     'global' => env('IP_RESTRICT_GLOBAL', true),
 
-    // View of the 403 page (receives $ip).
+    // View of the 403 page (receives $ip, and $reason: not_allowed or denied).
     'forbidden_view' => 'ip-restrict::forbidden',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Attack attempts log
+    |--------------------------------------------------------------------------
+    |
+    | One JSON line per attempt in "dir"/YYYY-MM-DD.jsonl (keep it out of the deployed folder).
+    | Recorded: failed logins and lockouts (Laravel auth events, 5.2+), requests for "probes"
+    | paths, requests refused by the allow list ("not_allowed"), and what your code reports with
+    | app(\Wave\SecurityIpRestrict\Attempts::class)->recordRequest($request, 'custom', 'why').
+    | Local addresses are never logged; requests from denied addresses are not logged either.
+    |
+    */
+
+    'attempts' => array(
+        'enabled' => env('IP_RESTRICT_ATTEMPTS', true),
+        'dir' => storage_path('app/ip-restrict-attempts'),
+        'keep_days' => 30,
+        // Day file size past which only the blockings are still written (flood protection).
+        'max_day_bytes' => 10 * 1024 * 1024,
+        // Also write each attempt to the Laravel log (warning level).
+        'laravel_log' => env('IP_RESTRICT_ATTEMPTS_LOG', false),
+        // Listen to Illuminate\Auth\Events\Failed and Lockout.
+        'login_failed' => true,
+        // Credential field logged with a failed login (never the password). null: none.
+        'login_field' => 'email',
+        // Log the requests refused by the allow list (they are never counted for blocking).
+        'not_allowed' => true,
+        // Paths that scanners probe ($request->is() patterns). The request goes on normally.
+        'probes' => array(
+            'wp-login.php', 'wp-admin', 'wp-admin/*', 'wp-content/*', 'wp-includes/*', 'xmlrpc.php',
+            '.env', '.env.*', '*/.env', '.git', '.git/*', 'phpmyadmin', 'phpmyadmin/*', 'pma/*',
+            'cgi-bin/*', 'vendor/phpunit/*', 'boaform/*', 'config.php', 'admin.php', 'shell.php',
+        ),
+    ),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Automatic blocking
+    |--------------------------------------------------------------------------
+    |
+    | An address with "threshold" attempts of the counted "types" within "window" minutes is
+    | denied for "ban" minutes (0: until unblocked from the admin page or the console).
+    | Addresses on the allow list (and local ones) are never blocked.
+    |
+    */
+
+    'auto_block' => array(
+        'enabled' => env('IP_RESTRICT_AUTO_BLOCK', true),
+        'types' => array('login_failed', 'lockout', 'probe', 'custom'),
+        'threshold' => (int) env('IP_RESTRICT_AUTO_BLOCK_THRESHOLD', 5),
+        'window' => (int) env('IP_RESTRICT_AUTO_BLOCK_WINDOW', 10),
+        'ban' => (int) env('IP_RESTRICT_AUTO_BLOCK_BAN', 60),
+    ),
 
     /*
     |--------------------------------------------------------------------------

@@ -11,14 +11,19 @@ namespace Wave\SecurityIpRestrict;
  * and the one that covers the address of the person removing it. An added entry is deleted;
  * a .env entry (read only) is hidden and can be restored.
  *
+ * Denied addresses (deny list) always win over allowed ones, and work even when the restriction
+ * is off: the .env entries (config "deny", read only) and the entries added from the admin page,
+ * the console or the automatic blocking (Attempts), optionally until a date (expires_at).
+ *
  * Storage (config "file"), JSON:
- *   {version, ips: [{ip, label, added_at, added_by}], hidden: [{ip, hidden_at, hidden_by}]}
+ *   {version, ips: [{ip, label, added_at, added_by}], hidden: [{ip, hidden_at, hidden_by}],
+ *    denied: [{ip, label, added_at, added_by, expires_at|null}]}
  * The French keys of the original module (libelle, ajoute_le, ajoute_par, retirees, retiree_le,
  * retiree_par) are still read, and rewritten in English on the next change.
  */
 class IpList
 {
-    const VERSION = 2;
+    const VERSION = 3;
 
     const REMOVED = 'removed';
 
@@ -28,16 +33,23 @@ class IpList
 
     const UNKNOWN = 'unknown';
 
+    const DENIED = 'denied';
+
+    const ALREADY = 'already';
+
+    const ENV_ENTRY = 'env';
+
     /** @var array */
     private $config;
 
     /**
-     * @param  array  $config  ips (string), protected (string), local (array), file (string)
+     * @param  array  $config  ips (string), deny (string), protected (string), local (array), file (string)
      */
     public function __construct(array $config)
     {
         $this->config = $config + [
             'ips' => '',
+            'deny' => '',
             'protected' => '',
             'local' => array('127.0.0.1', '::1'),
             'file' => sys_get_temp_dir().'/ip-restrict.json',
@@ -261,6 +273,161 @@ class IpList
     }
 
     /**
+     * Local server address (config "local"): always allowed, never denied.
+     *
+     * @param  string|null  $ip
+     * @return bool
+     */
+    public function isLocal($ip)
+    {
+        return is_string($ip) && in_array($ip, (array) $this->config['local'], true);
+    }
+
+    /**
+     * Is this address denied (deny list, expired entries ignored)? Local addresses never are.
+     *
+     * @param  string|null  $ip
+     * @return bool
+     */
+    public function isDenied($ip)
+    {
+        return $this->denyEntryFor($ip) !== null;
+    }
+
+    /**
+     * The deny entry that covers this address, or null.
+     *
+     * @param  string|null  $ip
+     * @return array|null
+     */
+    public function denyEntryFor($ip)
+    {
+        if (! is_string($ip) || $ip === '' || $this->isLocal($ip)) {
+            return null;
+        }
+        foreach ($this->denied() as $entry) {
+            if (IpMatcher::matches($ip, $entry['ip'])) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Deny list: .env first, then the added entries that have not expired.
+     *
+     * @return array list of [ip, label, source (env|added), added_at?, added_by?, expires_at?]
+     */
+    public function denied()
+    {
+        $entries = array();
+        foreach (self::splitList($this->config['deny']) as $item) {
+            $parts = array_map('trim', explode('=', $item, 2));
+            if (IpMatcher::isValid($parts[0])) {
+                $entries[] = array('ip' => $parts[0], 'label' => isset($parts[1]) ? $parts[1] : '', 'source' => 'env', 'expires_at' => null);
+            }
+        }
+        $data = $this->read();
+        foreach ($data['denied'] as $entry) {
+            if (! self::isExpired($entry)) {
+                $entries[] = $entry + array('label' => '', 'source' => 'added', 'expires_at' => null);
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Denies an address or range, for $minutes (null or 0: until it is unblocked).
+     * Refused when it covers $myIp (you would lock yourself out) or a protected allowed entry.
+     *
+     * @param  string  $ip
+     * @param  string  $label
+     * @param  string  $by  who denied it (address, user name, "auto"…)
+     * @param  string|null  $myIp  address of the person denying it (null from the console)
+     * @param  int|null  $minutes
+     * @return string self::DENIED, ALREADY, IN_USE or PROTECTED_ENTRY
+     */
+    public function deny($ip, $label, $by, $myIp = null, $minutes = null)
+    {
+        foreach ($this->denied() as $entry) {
+            if ($entry['ip'] === $ip) {
+                return self::ALREADY;
+            }
+        }
+        if ($myIp !== null && IpMatcher::matches($myIp, $ip)) {
+            return self::IN_USE;
+        }
+        foreach ($this->fromEnv() as $entry) {
+            if ($entry['protected'] && IpMatcher::overlaps($entry['ip'], $ip)) {
+                return self::PROTECTED_ENTRY;
+            }
+        }
+
+        $expires = $minutes ? date('c', time() + 60 * (int) $minutes) : null;
+        $this->mutate(function ($data) use ($ip, $label, $by, $expires) {
+            $kept = array();
+            foreach ($data['denied'] as $entry) {
+                if ($entry['ip'] !== $ip) {
+                    $kept[] = $entry;
+                }
+            }
+            $kept[] = array('ip' => $ip, 'label' => (string) $label, 'added_at' => date('c'), 'added_by' => (string) $by, 'expires_at' => $expires);
+            $data['denied'] = $kept;
+
+            return $data;
+        });
+
+        return self::DENIED;
+    }
+
+    /**
+     * Unblocks an added deny entry. A .env entry can only be removed from the .env.
+     *
+     * @param  string  $ip
+     * @return string self::REMOVED, ENV_ENTRY or UNKNOWN
+     */
+    public function undeny($ip)
+    {
+        $found = null;
+        foreach ($this->denied() as $entry) {
+            if ($entry['ip'] === $ip) {
+                $found = $entry;
+                break;
+            }
+        }
+        if ($found === null) {
+            return self::UNKNOWN;
+        }
+        if ($found['source'] === 'env') {
+            return self::ENV_ENTRY;
+        }
+        $this->mutate(function ($data) use ($ip) {
+            $kept = array();
+            foreach ($data['denied'] as $entry) {
+                if ($entry['ip'] !== $ip) {
+                    $kept[] = $entry;
+                }
+            }
+            $data['denied'] = $kept;
+
+            return $data;
+        });
+
+        return self::REMOVED;
+    }
+
+    /**
+     * @param  array  $entry
+     * @return bool
+     */
+    private static function isExpired(array $entry)
+    {
+        return ! empty($entry['expires_at']) && strtotime($entry['expires_at']) <= time();
+    }
+
+    /**
      * @return array
      */
     private function read()
@@ -292,7 +459,15 @@ class IpList
             flock($handle, LOCK_EX);
             $raw = stream_get_contents($handle);
             $data = json_decode((string) $raw, true);
-            $data = call_user_func($change, self::normalize(is_array($data) ? $data : array()));
+            $data = self::normalize(is_array($data) ? $data : array());
+            $active = array();
+            foreach ($data['denied'] as $entry) {
+                if (! self::isExpired($entry)) {
+                    $active[] = $entry;
+                }
+            }
+            $data['denied'] = $active;
+            $data = call_user_func($change, $data);
             $data['version'] = self::VERSION;
             ftruncate($handle, 0);
             rewind($handle);
@@ -318,7 +493,9 @@ class IpList
         $hidden = isset($data['hidden']) && is_array($data['hidden']) ? $data['hidden']
             : (isset($data['retirees']) && is_array($data['retirees']) ? $data['retirees'] : array());
 
-        return array('version' => self::VERSION, 'ips' => self::renameKeys($ips), 'hidden' => self::renameKeys($hidden));
+        $denied = isset($data['denied']) && is_array($data['denied']) ? $data['denied'] : array();
+
+        return array('version' => self::VERSION, 'ips' => self::renameKeys($ips), 'hidden' => self::renameKeys($hidden), 'denied' => self::renameKeys($denied));
     }
 
     /**

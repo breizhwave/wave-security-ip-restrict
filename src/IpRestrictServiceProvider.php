@@ -14,6 +14,21 @@ class IpRestrictServiceProvider extends ServiceProvider
         $this->app->singleton('Wave\SecurityIpRestrict\IpList', function ($app) {
             return new IpList((array) $app['config']->get('ip-restrict', array()));
         });
+
+        $this->app->singleton('Wave\SecurityIpRestrict\Attempts', function ($app) {
+            $config = $app['config'];
+            $attempts = new Attempts(
+                (array) $config->get('ip-restrict.attempts', array()) + array('auto_block' => (array) $config->get('ip-restrict.auto_block', array())),
+                $app->make('Wave\SecurityIpRestrict\IpList')
+            );
+            if ($config->get('ip-restrict.attempts.laravel_log')) {
+                $attempts->setLogger(function (array $entry) use ($app) {
+                    $app['log']->warning('ip-restrict: '.$entry['type'].' from '.$entry['ip'].(empty($entry['blocked']) ? '' : ' (blocked)'), $entry);
+                });
+            }
+
+            return $attempts;
+        });
     }
 
     public function boot()
@@ -31,6 +46,7 @@ class IpRestrictServiceProvider extends ServiceProvider
                 'Wave\SecurityIpRestrict\Console\ListCommand',
                 'Wave\SecurityIpRestrict\Console\AddCommand',
                 'Wave\SecurityIpRestrict\Console\RemoveCommand',
+                'Wave\SecurityIpRestrict\Console\AttemptsCommand',
             ));
         }
 
@@ -43,11 +59,40 @@ class IpRestrictServiceProvider extends ServiceProvider
             }
         }
 
+        if ($config->get('ip-restrict.attempts.enabled', true) && $config->get('ip-restrict.attempts.login_failed', true)) {
+            $this->listenToLogins();
+        }
+
         if ($config->get('ip-restrict.admin.enabled') && ! $this->routesCached()) {
             $admin = (array) $config->get('ip-restrict.admin');
             $router = $this->app['router'];
             require __DIR__.'/../routes/admin.php';
         }
+    }
+
+    /**
+     * Failed logins (Laravel 5.2+) and lockouts after too many of them (Laravel 5.3+, ThrottlesLogins).
+     *
+     * @return void
+     */
+    private function listenToLogins()
+    {
+        $app = $this->app;
+        $events = $app['events'];
+
+        $events->listen('Illuminate\Auth\Events\Failed', function ($event) use ($app) {
+            $field = $app['config']->get('ip-restrict.attempts.login_field', 'email');
+            $login = '';
+            if ($field && isset($event->credentials) && is_array($event->credentials) && isset($event->credentials[$field]) && is_scalar($event->credentials[$field])) {
+                $login = (string) $event->credentials[$field];
+            }
+            $app->make('Wave\SecurityIpRestrict\Attempts')->recordRequest($app['request'], 'login_failed', $login);
+        });
+
+        $events->listen('Illuminate\Auth\Events\Lockout', function ($event) use ($app) {
+            $request = isset($event->request) ? $event->request : $app['request'];
+            $app->make('Wave\SecurityIpRestrict\Attempts')->recordRequest($request, 'lockout');
+        });
     }
 
     /**
