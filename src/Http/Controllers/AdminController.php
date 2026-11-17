@@ -23,6 +23,7 @@ class AdminController extends Controller
             'denied' => $ips->denied(),
             'myIpDenied' => $ips->isDenied($request->ip()),
             'active' => $ips->isActive(),
+            'scope' => \Wave\SecurityIpRestrict\Http\Middleware\RestrictIp::scope(),
             'myIp' => $request->ip(),
             'myIpAllowed' => $ips->isAllowed($request->ip()),
             'ok' => session('ip_restrict_ok'),

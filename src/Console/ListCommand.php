@@ -14,6 +14,8 @@ class ListCommand extends Command
     {
         $ips = $this->laravel->make('Wave\SecurityIpRestrict\IpList');
         $this->line($ips->isActive() ? 'Restriction: <info>active</info>' : 'Restriction: <comment>inactive</comment> (IP_RESTRICT_IPS empty)');
+        $scope = \Wave\SecurityIpRestrict\Http\Middleware\RestrictIp::scope();
+        $this->line('Scope: '.(count($scope) > 0 ? implode(', ', $scope) : 'whole application'));
 
         $rows = array();
         foreach ($ips->all() as $entry) {

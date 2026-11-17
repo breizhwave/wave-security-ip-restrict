@@ -45,6 +45,12 @@ return array(
     // Paths always open ($request->is() patterns): health check, webhooks…
     'except' => array('up'),
 
+    // Scope of the allow list ($request->is() patterns, comma separated). Empty: the whole
+    // application. Set, e.g. "admin,admin/*": only these paths are restricted to the allowed
+    // addresses, the rest of the site stays public. The deny list, the attempts log and the
+    // automatic blocking still cover every path. The admin page (admin.path) is always in scope.
+    'paths' => env('IP_RESTRICT_PATHS', ''),
+
     // Added / hidden entries (JSON). Keep it out of the deployed folder: it must survive deployments.
     'file' => storage_path('app/ip-restrict.json'),
 

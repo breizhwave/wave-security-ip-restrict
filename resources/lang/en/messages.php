@@ -68,6 +68,8 @@ return array(
     'admin_title' => 'Access by IP',
     'admin_help' => 'When the server .env lists at least one address (IP_RESTRICT_IPS), the whole application is only open to these addresses. The local server always passes. Someone who already has access can add or remove an address here, except the one they use and the protected entries (🔒). A removed .env entry is only hidden (the file is not changed) and can be restored.',
     'active' => 'Restriction active.',
+    'scope_all' => 'It covers the whole application.',
+    'scope_paths' => 'It only covers these paths (IP_RESTRICT_PATHS): :paths. The rest of the site is public; the deny list covers everything.',
     'inactive' => 'Restriction inactive: IP_RESTRICT_IPS is empty in the .env, the application is open to every address.',
     'mine_allowed' => 'allowed, row highlighted in green',
     'mine_not_listed' => 'not listed',

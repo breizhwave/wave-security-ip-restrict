@@ -68,6 +68,8 @@ return array(
     'admin_title' => 'Accès par IP',
     'admin_help' => "Toute l'application n'est ouverte qu'à ces adresses quand le .env du serveur en donne au moins une (IP_RESTRICT_IPS). Le serveur local passe toujours. Une personne qui a déjà accès peut ajouter ou retirer une adresse ici, sauf celle qu'elle utilise et les entrées protégées (🔒). Retirée, une entrée du .env est seulement masquée (le fichier n'est pas modifié) et peut être rétablie.",
     'active' => 'Restriction active.',
+    'scope_all' => "Elle couvre toute l'application.",
+    'scope_paths' => 'Elle ne couvre que ces chemins (IP_RESTRICT_PATHS) : :paths. Le reste du site est public ; la liste de blocage couvre tout.',
     'inactive' => "Restriction inactive : IP_RESTRICT_IPS est vide dans le .env, l'application est ouverte à toutes les adresses.",
     'mine_allowed' => 'autorisée, ligne surlignée en vert',
     'mine_not_listed' => 'non listée',

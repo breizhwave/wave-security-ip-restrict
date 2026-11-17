@@ -23,6 +23,9 @@
 
     <div class="alert {{ $active ? 'info' : 'error' }}">
         {{ trans($active ? 'ip-restrict::messages.active' : 'ip-restrict::messages.inactive') }}
+        @if ($active)
+            {{ count($scope) > 0 ? trans('ip-restrict::messages.scope_paths', array('paths' => implode(', ', $scope))) : trans('ip-restrict::messages.scope_all') }}
+        @endif
         {{ trans('ip-restrict::messages.your_address') }} <code class="my-ip">{{ $myIp }}</code>
         ({{ trans($myIpAllowed ? 'ip-restrict::messages.mine_allowed' : 'ip-restrict::messages.mine_not_listed') }}).
         @if ($myIpDenied)

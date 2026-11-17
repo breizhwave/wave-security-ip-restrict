@@ -6,6 +6,8 @@
 - Attack attempts log, one JSON file per day: failed logins and lockouts (Laravel auth events), scanner probes (`attempts.probes`), requests refused by the allow list, and custom attempts (`Attempts::recordRequest()`). Optional copy to the Laravel log.
 - Automatic blocking: 5 counted attempts within 10 minutes deny the address for 60 minutes (configurable, `IP_RESTRICT_AUTO_BLOCK=false` to only log). Allowed addresses are never blocked.
 - Admin page: deny list section and an "Attack attempts" tab (by day, by address, detail, block / unblock). New `ip-restrict:attempts` command.
+- Allow list scope (`IP_RESTRICT_PATHS`): restrict only some paths, e.g. the back office, while the deny list and the automatic blocking still cover the whole site. The admin page is always in scope.
+- README: use cases with diagrams, and who can open the admin page.
 - The 403 view receives `$reason` (`not_allowed` or `denied`).
 - JSON file version 3 (`denied` key); version 2 files are still read.
 - README: comparison with akaunting/laravel-firewall and other IP blocking / WAF options.

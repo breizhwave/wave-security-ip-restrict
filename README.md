@@ -7,6 +7,7 @@ Restrict a whole Laravel application to an allow list of IP addresses (IPv4, IPv
   - **Removing an added entry** deletes it from the JSON file.
   - **Removing a `.env` entry** only hides it: the JSON file records the address with when and by whom (`hidden_at`, `hidden_by`), and the address is refused from then on. The `.env` itself is never changed. The application often can't write to it (read-only file, cached config, managed by the deployment), and it stays the reference list that you version and deploy. Hiding also keeps the removal reversible: **restoring** (`ip-restrict:remove <ip> --restore`, or the button on the page) takes the address off the hidden list, with its original `.env` label, without touching the server. To remove a `.env` address for good, delete it from `IP_RESTRICT_IPS`.
 - Some `.env` entries can be protected (they are never removable from the page), and nobody can remove the entry that covers the address they are using.
+- The allow list covers the whole application, or only some paths (`IP_RESTRICT_PATHS`, e.g. your back office) while the rest of the site stays public. See [Use cases](#use-cases).
 - A **deny list** (`IP_RESTRICT_DENY`, the admin page, the console) refuses addresses even when the restriction is off: it works on a public site too. See [Deny list](#deny-list).
 - **Attack attempts** (failed logins, lockouts, scanner probes such as `wp-login.php` or `.env`, refused requests) are logged one file per day, shown by date on the admin page, and an address that repeats them is **blocked automatically** for a while. See [Attack attempts and automatic blocking](#attack-attempts-and-automatic-blocking).
 - Refused requests get a 403 page that shows the visitor's address. The page is in English and French and can be published to change it.
@@ -25,6 +26,7 @@ Every request is checked against both sources:
 ```
 restriction on  =  IP_RESTRICT_IPS has at least one valid entry
 allowed         =  (.env entries − hidden ones)  +  added entries  +  local (127.0.0.1, ::1)
+restricted path =  every path, or only IP_RESTRICT_PATHS (+ the admin page) when it is set
 ```
 
 What follows from it:
@@ -77,6 +79,135 @@ The log keeps `keep_days` days (30). Past `max_day_bytes` (10 MB) in a day, only
 
 The admin page has an **Attack attempts** tab: pick a day, see the attempts grouped by address (count, types, first and last time, state), the detail of one address, and **Block** or **Unblock** in one click.
 
+## Who can open the admin page
+
+The package has **no admin account of its own**: it has no users and no password. The admin page is protected by the allow list and by the middleware you give it (`admin.middleware`).
+
+| Setup | Who gets into `/ip-restrict` |
+| --- | --- |
+| `IP_RESTRICT_ADMIN` unset (default) | Nobody: the routes are not registered. Use the console. |
+| Allow list on the whole application | Allowed addresses and local ones, then `admin.middleware`. |
+| Allow list on some paths (`IP_RESTRICT_PATHS`) | The same: the admin page is always added to the scope. |
+| Allow list empty (`IP_RESTRICT_IPS=""`) | **Anyone** who passes `admin.middleware`. Add your authentication, e.g. `['web', 'auth']`, or set an allow list scoped to the admin page (use case 3). |
+
+A denied address never gets in, whatever the setup.
+
+## Use cases
+
+### 1. Private application (staging, intranet, client preview)
+
+The whole application is closed to everyone except the team. Health checks stay open.
+
+```
+                                     whole application
+ office   203.0.113.10    ─► allowed ─► /  /login  /admin  /api  …   200
+ Alice    2001:db8:1:2::5 ─► allowed (her /64 range)                  200
+ stranger 192.0.2.1       ─► not on the list                          403 "Restricted access"
+                                                    logged as not_allowed
+ load balancer            ─► /up (in except)                          200
+```
+
+```dotenv
+IP_RESTRICT_IPS="203.0.113.10=Office,2001:db8:1:2::/64=Alice (IPv6)"
+IP_RESTRICT_PROTECTED="Office"
+IP_RESTRICT_ADMIN=true
+```
+
+The team manages the list at `/ip-restrict`. Strangers never reach the login page, so brute force is not possible. Scanner probes from allowed addresses are logged as trusted.
+
+### 2. Public site, back office for the team only, automatic blocking everywhere
+
+The site is public. Only `/admin` is restricted to the team's addresses. Scanners and brute force are blocked on the whole site.
+
+```
+                            public part                  │ restricted part (IP_RESTRICT_PATHS)
+                            /  /blog  /login  /api       │ /admin/*  /ip-restrict/*
+ visitor     192.0.2.1    ─► 200                         │ 403 "Restricted access"
+ office      203.0.113.10 ─► 200                         │ 200
+ scanner     192.0.2.66   ─► /wp-login.php 404, /.env 404 …
+                             5th probe within 10 min ─► 403 "Access blocked" on EVERY path, 60 min
+ brute force 192.0.2.77   ─► POST /login failed ×5   ─► blocked the same way
+```
+
+```dotenv
+IP_RESTRICT_IPS="203.0.113.10=Office,198.51.100.7=Alice"
+IP_RESTRICT_PROTECTED="Office"
+IP_RESTRICT_PATHS="admin,admin/*"
+IP_RESTRICT_ADMIN=true
+# defaults: 5 attempts in 10 min, 60 min ban
+```
+
+- The team's addresses are **trusted**: never blocked automatically, even when someone mistypes a password.
+- If your login page is under `/admin` (`/admin/login`), it is restricted too, and brute force from outside never reaches it. If it is public (`/login`), customers who fail 5 times in 10 minutes are blocked for an hour. Raise `IP_RESTRICT_AUTO_BLOCK_THRESHOLD` if that is too strict.
+- The **Attack attempts** tab shows who tried what, by day. Use it to unblock a customer or to block a range for good.
+
+### 3. Public site, deny list and automatic blocking only (like fail2ban)
+
+There is no allow list at all: the package only refuses bad addresses.
+
+```
+ every request ─► denied? ──yes──► 403 "Access blocked"   (not logged again)
+                     │ no
+                     ▼
+                 probe path? ──yes──► log + count ─► threshold reached? ─► deny for 60 min, 403
+                     │ no                                  │ no
+                     ▼                                     ▼
+                 application  ◄────────────────────────────┘
+                     │
+                 failed login / lockout / your own report ─► log + count ─► …
+```
+
+```dotenv
+IP_RESTRICT_IPS=""
+IP_RESTRICT_DENY="198.51.100.0/24=Scraper"
+IP_RESTRICT_ADMIN=true
+```
+
+With an empty allow list, **only `admin.middleware` protects the admin page**. Choose one:
+
+- publish the config and set `'middleware' => array('web', 'auth')`, plus your own admin check;
+- or protect the admin page alone by address: `IP_RESTRICT_IPS="203.0.113.10=Office"` and `IP_RESTRICT_PATHS="ip-restrict,ip-restrict/*"`. The rest of the site stays public, as in use case 2.
+
+### 4. Behind a reverse proxy or a CDN
+
+```
+ visitor 192.0.2.1 ─► CDN / load balancer 172.68.1.2 ─► nginx ─► Laravel
+                      adds X-Forwarded-For: 192.0.2.1
+
+ trusted proxies set      $request->ip() = 192.0.2.1    ✔ each visitor is seen as themselves
+ trusted proxies missing  $request->ip() = 172.68.1.2   ✘ every visitor has the same address:
+                          - allow list: everyone refused (or everyone allowed if the proxy is 127.0.0.1)
+                          - automatic blocking: the first scanner blocks the proxy, so the whole site
+```
+
+Configure trusted proxies before you turn anything on: `->withMiddleware(fn ($m) => $m->trustProxies(at: [...]))` in `bootstrap/app.php` (Laravel 11+), or `App\Http\Middleware\TrustProxies` (earlier versions). Then check that the Attack attempts tab shows your visitors' addresses, not the proxy's. Run the [header spoofing check](#checking-that-the-restriction-is-active) too.
+
+### 5. Locked out
+
+```
+ you ─► 403 "Restricted access"  (new home address)   ─► ssh ─► php artisan ip-restrict:add 192.0.2.10 "Me, home"
+ you ─► 403 "Access blocked"     (blocked by mistake) ─► ssh ─► php artisan ip-restrict:remove 192.0.2.10 --deny
+```
+
+The page shows the address the server sees: that's the one to add or unblock. `php artisan ip-restrict:list` shows both lists.
+
+### 6. Report your own attempts
+
+Anything your code considers hostile can count toward the blocking: a wrong API token, a failed 2FA code, a spam form, a forged signature.
+
+```php
+use Wave\SecurityIpRestrict\Attempts;
+
+if (! hash_equals($expected, (string) $request->header('X-Token'))) {
+    if (app(Attempts::class)->recordRequest($request, 'custom', 'Bad API token') === Attempts::BLOCKED) {
+        abort(403);
+    }
+    abort(401);
+}
+```
+
+To count your own type, add it to `auto_block.types` (published config), e.g. `'types' => array('login_failed', 'lockout', 'probe', 'custom', 'api_token')`.
+
 ## Install
 
 ```bash
@@ -101,6 +232,8 @@ Laravel 5.5 and later discover the service provider automatically. On Laravel 5.
 IP_RESTRICT_IPS="203.0.113.10=Office,198.51.100.7=Alice,2001:db8:1:2::/64=Alice (IPv6)"
 # .env entries never removable from the admin page (label prefixes)
 IP_RESTRICT_PROTECTED="Office,Alice"
+# Restrict only these paths (empty: the whole application). The admin page is always included.
+IP_RESTRICT_PATHS=""
 # Admin page at /ip-restrict (off by default)
 IP_RESTRICT_ADMIN=true
 
@@ -129,6 +262,7 @@ php artisan vendor:publish --tag=ip-restrict-lang    # en / fr texts
 | `protected` | `IP_RESTRICT_PROTECTED` | Label prefixes of protected `.env` entries. |
 | `local` | `127.0.0.1`, `::1` | Always allowed, for `php artisan serve`. |
 | `except` | `['up']` | Paths that stay open, as `$request->is()` patterns. |
+| `paths` | `IP_RESTRICT_PATHS` (empty) | Scope of the allow list, comma separated `$request->is()` patterns. Empty: the whole application. The admin page is always added. The deny list and the blocking cover every path. |
 | `file` | `storage/app/ip-restrict.json` | Added and hidden entries. |
 | `global` | `true` | Prepends the middleware to the global HTTP stack. |
 | `forbidden_view` | `ip-restrict::forbidden` | The 403 page. |
@@ -151,6 +285,8 @@ php artisan vendor:publish --tag=ip-restrict-lang    # en / fr texts
 | `auto_block.threshold` / `window` / `ban` | `5` / `10` min / `60` min | See above. `ban` `0`: until unblocked. |
 
 ### Using the middleware on some routes only
+
+To keep part of the site public, prefer `IP_RESTRICT_PATHS` (use case 2): the deny list and the automatic blocking then still cover every path. With `global` set to `false`, every check, deny list and probes included, only runs on the routes you put the middleware on.
 
 Set `global` to `false` (`IP_RESTRICT_GLOBAL=false`), then use the class as you would any middleware:
 
@@ -387,7 +523,7 @@ Browsing from an allowed address only shows that you get in. To check the restri
 - **Automatic blocking behind a proxy**: if trusted proxies are not configured, every request seems to come from the proxy, so the first scanner gets **the proxy blocked, and so every visitor**. Configure trusted proxies before you leave `IP_RESTRICT_AUTO_BLOCK` on, and check the attempts tab shows real visitor addresses. If your proxies trust forwarded headers from anyone, an attacker can also get any address blocked by forging `X-Forwarded-For`.
 - **Shared addresses and automatic blocking**: an office, a school or a mobile operator's NAT shares one address. Five failed logins there block everyone behind it for `ban` minutes. Put the addresses you rely on in the allow list (they are never blocked), and keep `ban` short.
 - **The log is personal data**: it holds addresses, user agents and the login tried. `keep_days` limits how long it is kept, and it is shown only on the admin page.
-- **Admin page with the restriction off**: when `IP_RESTRICT_IPS` is empty, only `admin.middleware` protects the admin page. Keep it disabled, or put it behind authentication.
+- **Admin page with the restriction off**: when `IP_RESTRICT_IPS` is empty, only `admin.middleware` protects the admin page. Keep it disabled, or put it behind authentication (see [Who can open the admin page](#who-can-open-the-admin-page)).
 - **Static files**: files the web server serves directly from `public/` never reach Laravel, so they stay readable. To close them too, add a rule to the web server configuration, for example in Apache:
 
   ```apache

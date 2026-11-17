@@ -11,7 +11,8 @@ use Wave\SecurityIpRestrict\IpList;
  *   1. "except" paths pass;
  *   2. a denied address (deny list) is refused, even when the restriction is off;
  *   3. a request for a "probes" path is logged as an attempt (and may block the address);
- *   4. when IP_RESTRICT_IPS is set, only the allowed addresses pass (refusals are logged).
+ *   4. when IP_RESTRICT_IPS is set, only the allowed addresses pass (refusals are logged), on the
+ *      whole application or, with IP_RESTRICT_PATHS, on these paths (and the admin page) only.
  * Local addresses always pass.
  *
  * Only covers requests that go through Laravel: files served directly by the web server from
@@ -54,7 +55,7 @@ class RestrictIp
             }
         }
 
-        if (! $this->ips->isActive() || $this->ips->isAllowed($ip)) {
+        if (! $this->ips->isActive() || ! $this->inScope($request) || $this->ips->isAllowed($ip)) {
             return $next($request);
         }
         if (! $logged && config('ip-restrict.attempts.not_allowed', true)) {
@@ -72,6 +73,37 @@ class RestrictIp
     private function forbidden($ip, $reason)
     {
         return response()->view((string) config('ip-restrict.forbidden_view', 'ip-restrict::forbidden'), array('ip' => $ip, 'reason' => $reason), 403);
+    }
+
+    /**
+     * Is the allow list applied to this path? (config "paths", empty: everywhere)
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return bool
+     */
+    private function inScope($request)
+    {
+        $patterns = self::scope();
+
+        return count($patterns) === 0 || $this->is($request, $patterns);
+    }
+
+    /**
+     * Patterns of the allow list scope, with the admin page added; empty: the whole application.
+     *
+     * @return array
+     */
+    public static function scope()
+    {
+        $paths = config('ip-restrict.paths', '');
+        $patterns = array_values(array_filter(array_map('trim', is_array($paths) ? $paths : explode(',', (string) $paths)), 'strlen'));
+        if (count($patterns) > 0 && config('ip-restrict.admin.enabled')) {
+            $admin = trim((string) config('ip-restrict.admin.path', 'ip-restrict'), '/');
+            $patterns[] = $admin;
+            $patterns[] = $admin.'/*';
+        }
+
+        return $patterns;
     }
 
     /**
