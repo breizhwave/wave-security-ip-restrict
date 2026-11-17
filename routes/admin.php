@@ -2,7 +2,7 @@
 
 /*
  * Admin page routes, loaded by IpRestrictServiceProvider when ip-restrict.admin.enabled is true.
- * In scope: $router (Illuminate\Routing\Router), $admin (config ip-restrict.admin).
+ * In scope: $router (Illuminate\Routing\Router), $admin (config ip-restrict.admin), $global (config ip-restrict.global).
  */
 
 $controller = 'Wave\SecurityIpRestrict\Http\Controllers\AdminController';
@@ -10,7 +10,11 @@ $write = isset($admin['write_middleware']) ? (array) $admin['write_middleware'] 
 
 $router->group(array(
     'prefix' => isset($admin['path']) ? $admin['path'] : 'ip-restrict',
-    'middleware' => isset($admin['middleware']) ? (array) $admin['middleware'] : array(),
+    // Without the global middleware, the admin page still gets the IP checks.
+    'middleware' => array_merge(
+        empty($global) ? array('Wave\SecurityIpRestrict\Http\Middleware\RestrictIp') : array(),
+        isset($admin['middleware']) ? (array) $admin['middleware'] : array()
+    ),
 ), function ($router) use ($controller, $write) {
     $router->get('/', array('as' => 'ip-restrict.index', 'uses' => $controller.'@index'));
     $router->post('/', array('as' => 'ip-restrict.add', 'uses' => $controller.'@add', 'middleware' => $write));

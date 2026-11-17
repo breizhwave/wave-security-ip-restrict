@@ -12,7 +12,6 @@
 <div class="ipr">
     <h1>{{ trans('ip-restrict::messages.admin_title') }}</h1>
     @include('ip-restrict::_nav', array('current' => 'index'))
-    <p class="help">{{ trans('ip-restrict::messages.admin_help') }}</p>
 
     @if ($ok)
         <div class="alert ok">{{ $ok }}</div>
@@ -20,6 +19,11 @@
     @if ($error)
         <div class="alert error">{{ $error }}</div>
     @endif
+
+    @include('ip-restrict::_overview')
+
+    <h2 id="allow">{{ trans('ip-restrict::messages.allow_title') }}</h2>
+    <p class="help">{{ trans('ip-restrict::messages.admin_help') }}</p>
 
     <div class="alert {{ $active ? 'info' : 'error' }}">
         {{ trans($active ? 'ip-restrict::messages.active' : 'ip-restrict::messages.inactive') }}

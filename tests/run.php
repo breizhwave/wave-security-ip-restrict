@@ -8,7 +8,9 @@
 require __DIR__.'/../src/IpMatcher.php';
 require __DIR__.'/../src/IpList.php';
 require __DIR__.'/../src/Attempts.php';
+require __DIR__.'/../src/AccessOverview.php';
 
+use Wave\SecurityIpRestrict\AccessOverview;
 use Wave\SecurityIpRestrict\Attempts;
 use Wave\SecurityIpRestrict\IpList;
 use Wave\SecurityIpRestrict\IpMatcher;
@@ -262,6 +264,64 @@ check('rewritten in English', isset($data['ips'][0]['label']) && ! isset($data['
 @unlink($file);
 @rmdir(dirname($file));
 @rmdir(dirname(dirname($file)));
+
+// --- AccessOverview
+function cells($overview, $row)
+{
+    foreach ($overview['rows'] as $r) {
+        if ($r['key'] === $row) {
+            return $r['cells'];
+        }
+    }
+}
+$base = array('except' => array('up'), 'admin_enabled' => true, 'admin_middleware' => array('web'), 'auto_block' => true, 'attempts' => true, 'my_ip' => '203.0.113.10', 'my_row' => 'allowed');
+
+$o = AccessOverview::build(array('active' => true) + $base);
+check('case 1', $o['use_case']['number'], 1);
+check('case 1 columns', array_map(function ($c) { return $c['key']; }, $o['columns']), array('except', 'app', 'admin'));
+check('case 1 other', cells($o, 'other'), array('except' => 'open', 'app' => 'restricted', 'admin' => 'restricted'));
+check('case 1 allowed', cells($o, 'allowed'), array('except' => 'open', 'app' => 'open', 'admin' => 'open'));
+check('case 1 denied', cells($o, 'denied'), array('except' => 'open', 'app' => 'blocked', 'admin' => 'blocked'));
+check('case 1 no warning', $o['warnings'], array());
+check('my row flagged', $o['rows'][1]['mine'], true);
+
+$o = AccessOverview::build(array('active' => true, 'scope' => array('admin', 'admin/*')) + $base);
+check('case 2', $o['use_case']['number'], 2);
+check('case 2 other', cells($o, 'other'), array('except' => 'open', 'scoped' => 'restricted', 'public' => 'open', 'admin' => 'restricted'));
+check('case 2 denied public', cells($o, 'denied')['public'], 'blocked');
+
+$o = AccessOverview::build(array('active' => true, 'scope' => array('ip-restrict', 'ip-restrict/*')) + $base);
+check('case 3, admin only', $o['use_case']['key'], 'case_3_admin');
+
+$o = AccessOverview::build(array('active' => false, 'my_row' => 'other', 'my_ip' => '192.0.2.1') + $base);
+check('case 3', $o['use_case']['number'], 3);
+check('case 3 admin open', cells($o, 'other')['admin'], 'admin_open');
+check('case 3 warning', $o['warnings'][0]['key'], 'warn_admin_open');
+$o = AccessOverview::build(array('active' => false, 'admin_middleware' => array('web', 'auth')) + $base);
+check('case 3 with auth', cells($o, 'other')['admin'], 'login');
+check('case 3 with auth, no warning', $o['warnings'], array());
+
+$o = AccessOverview::build(array('active' => false, 'auto_block' => false, 'admin_middleware' => array('web', 'auth')) + $base);
+check('idle', $o['use_case']['key'], 'case_idle');
+$o = AccessOverview::build(array('active' => false, 'auto_block' => false, 'denied_count' => 2, 'admin_middleware' => array('auth')) + $base);
+check('deny only', $o['use_case']['number'] === 3 && $o['use_case']['notes'] === array('note_no_auto'), true);
+
+$o = AccessOverview::build(array('active' => true, 'global' => false) + $base);
+check('custom', $o['use_case']['key'], 'case_custom');
+check('custom unguarded', cells($o, 'denied')['unguarded'], 'open');
+check('custom warning', $o['warnings'][0]['key'], 'warn_not_global');
+
+$o = AccessOverview::build(array('active' => true, 'admin_enabled' => false) + $base);
+check('admin off', cells($o, 'allowed')['admin'], 'off');
+
+$o = AccessOverview::build(array('active' => true, 'my_ip' => '10.0.0.5', 'forwarded_for' => '192.0.2.1, 10.0.0.5') + $base);
+check('proxy warning', $o['warnings'][0]['key'] === 'warn_proxy' && $o['warnings'][0]['params']['forwarded'] === '192.0.2.1', true);
+$o = AccessOverview::build(array('active' => true, 'my_ip' => '10.0.0.5') + $base);
+check('private warning', $o['warnings'][0]['key'], 'warn_private');
+$o = AccessOverview::build(array('active' => true, 'my_ip' => '192.0.2.1', 'forwarded_for' => '192.0.2.1') + $base);
+check('forwarded matches', $o['warnings'], array());
+check('auth detection', AccessOverview::hasAuth(array('web', 'auth:sanctum')), true);
+check('auth detection, none', AccessOverview::hasAuth(array('web', 'throttle:20,1', 'author')), false);
 
 echo ($failures === 0 ? 'OK' : 'FAILED')." ($count checks, $failures failures, PHP ".PHP_VERSION.")\n";
 exit($failures === 0 ? 0 : 1);

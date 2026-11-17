@@ -95,8 +95,7 @@ class RestrictIp
      */
     public static function scope()
     {
-        $paths = config('ip-restrict.paths', '');
-        $patterns = array_values(array_filter(array_map('trim', is_array($paths) ? $paths : explode(',', (string) $paths)), 'strlen'));
+        $patterns = self::userScope();
         if (count($patterns) > 0 && config('ip-restrict.admin.enabled')) {
             $admin = trim((string) config('ip-restrict.admin.path', 'ip-restrict'), '/');
             $patterns[] = $admin;
@@ -104,6 +103,18 @@ class RestrictIp
         }
 
         return $patterns;
+    }
+
+    /**
+     * Patterns of IP_RESTRICT_PATHS (config "paths"), without the admin page.
+     *
+     * @return array
+     */
+    public static function userScope()
+    {
+        $paths = config('ip-restrict.paths', '');
+
+        return array_values(array_filter(array_map('trim', is_array($paths) ? $paths : explode(',', (string) $paths)), 'strlen'));
     }
 
     /**

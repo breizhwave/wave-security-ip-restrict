@@ -90,7 +90,9 @@ The package has **no admin account of its own**: it has no users and no password
 | Allow list on some paths (`IP_RESTRICT_PATHS`) | The same: the admin page is always added to the scope. |
 | Allow list empty (`IP_RESTRICT_IPS=""`) | **Anyone** who passes `admin.middleware`. Add your authentication, e.g. `['web', 'auth']`, or set an allow list scoped to the admin page (use case 3). |
 
-A denied address never gets in, whatever the setup.
+A denied address never gets in, whatever the setup. With `IP_RESTRICT_GLOBAL=false`, the admin routes still get the IP checks.
+
+The top of the admin page shows this for your live configuration: which use case below it matches, a grid of who gets where (local, allowed, everyone else, denied × always open paths, restricted paths, rest of the site, admin page), and warnings when the admin page is open to everyone or the server seems to see a proxy's address instead of yours.
 
 ## Use cases
 

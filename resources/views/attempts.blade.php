@@ -11,7 +11,7 @@
 <body>
 <div class="ipr">
     <h1>{{ trans('ip-restrict::messages.admin_title') }}</h1>
-    @include('ip-restrict::_nav', array('current' => 'attempts'))
+    @include('ip-restrict::_nav', array('current' => 'attempts', 'nav' => $nav))
     <p class="help">{{ trans('ip-restrict::messages.attempts_help') }}</p>
 
     @if ($ok)

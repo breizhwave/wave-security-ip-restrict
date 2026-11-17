@@ -65,6 +65,7 @@ class IpRestrictServiceProvider extends ServiceProvider
 
         if ($config->get('ip-restrict.admin.enabled') && ! $this->routesCached()) {
             $admin = (array) $config->get('ip-restrict.admin');
+            $global = (bool) $config->get('ip-restrict.global');
             $router = $this->app['router'];
             require __DIR__.'/../routes/admin.php';
         }
